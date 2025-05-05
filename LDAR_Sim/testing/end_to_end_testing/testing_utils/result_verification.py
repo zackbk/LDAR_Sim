@@ -1,16 +1,32 @@
-import filecmp
-import json
-import logging
-import math
-import numbers
+"""
+------------------------------------------------------------------------------
+Program:     The LDAR Simulator (LDAR-Sim)
+File:        result_verification.py
+Purpose: Contains functions for verifying E2E testing
 
-# import pickle
+This program is free software: you can redistribute it and/or modify
+it under the terms of the MIT License as published
+by the Free Software Foundation, version 3.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+MIT License for more details.
+You should have received a copy of the MIT License
+along with this program.  If not, see <https://opensource.org/licenses/MIT>.
+
+------------------------------------------------------------------------------
+"""
+
+import filecmp
+import logging
+import os
+
 import subprocess
 from datetime import datetime
-from typing import Any, Literal
+from typing import Literal
+import pandas as pd
 
-import yaml
-from testing_utils.comparison_funcs import check_relative_similarity
 
 DEFAULT_TEST_DIR: str = "testing/end_to_end_testing/test_results/"
 
@@ -27,82 +43,47 @@ def get_git_commit_hash() -> str | None:
     return git_commit_hash
 
 
-def compare_params(out_dir, expected_dir) -> Literal["Success", "Failure"]:
-    # Read in parameters and expected parameters
-    with open(out_dir / "parameters.yaml", "r") as params_file:
-        params: Any = yaml.safe_load(params_file)
-    with open(expected_dir / "parameters.yaml", "r") as expected_params_file:
-        expected_params: Any = yaml.safe_load((expected_params_file))
-    # Check that parameters match as expected
-    if params == expected_params:
-        return "Success"
-    return "Failure"
+def read_and_normalize_csv(file_path):
+    """Read and normalize a CSV file by sorting and resetting index."""
+    df = pd.read_csv(file_path)
+    df_sorted = df.sort_values(by=list(df.columns)).reset_index(drop=True)
+    return df_sorted
 
 
-def compare_prog_tables(out_dir, expected_dir, logger) -> Literal["Success", "Failure"]:
-    ret_string = "Success"
+def compare_csvs(out_dir, expected_dir, logger) -> Literal["Success", "Failure"]:
+    """Compare CSV files in out_dir with identically named CSV files in expected_dir."""
+    # Get list of CSV files in out_dir
+    out_csv_files = [f for f in os.listdir(out_dir) if f.endswith(".csv")]
 
-    # Read in program table and expected program table
-    with open(out_dir / "prog_table.json", "r") as prog_table_file:
-        prog_table_json: str = prog_table_file.read()
-        prog_table: Any = json.loads(prog_table_json)
-    with open(expected_dir / "prog_table.json", "r") as expected_prog_table_file:
-        expected_prog_table_json: str = expected_prog_table_file.read()
-        expected_prog_table: Any = json.loads(expected_prog_table_json)
+    success = True
 
-    for prog, prog_e in zip(prog_table, expected_prog_table):
-        # Iterate through results in the program table and compare them to the expected results.
-        # If they are numeric, test that they are within 1% of each other,
-        # otherwise they should match.
-        for (metric, val), (e_metric, e_val) in zip(prog.items(), prog_e.items()):
-            if metric != "program_name" and metric != "methods":
-                if isinstance(e_val, numbers.Number) and not math.isnan(e_val):
-                    stat_similar = check_relative_similarity(0.01, val, e_val)
-                elif val == e_val or (math.isnan(val)) and math.isnan(e_val):
-                    stat_similar = "Success"
-                else:
-                    stat_similar = "Failure"
-                # Log the results of the comparison
-                logger.info(
-                    f"Program table Program: {prog['program_name']} comparison of {metric}"
-                    + f" to expected value results in: {stat_similar}"
-                )
-                if stat_similar == "Failure":
-                    ret_string = stat_similar
-            elif metric == "methods":
-                # Iterate through results relating to a method in the program table,
-                # and compare them to the expected results.
-                # If they are numeric, test that they are within 1% of each other,
-                # otherwise they should match.
-                for (method, m_vals), (e_method, e_m_vals) in zip(val.items(), e_val.items()):
-                    for m_val, e_m_val in zip(m_vals, e_m_vals):
-                        if isinstance(e_m_vals[e_m_val], numbers.Number) and not math.isnan(
-                            e_m_vals[e_m_val]
-                        ):
-                            stat_similar: Literal["Success", "Failure"] = check_relative_similarity(
-                                0.01, m_vals[m_val], e_m_vals[e_m_val]
-                            )
-                        elif (
-                            m_vals[m_val] == e_m_vals[e_m_val]
-                            or (math.isnan(m_vals[m_val]))
-                            and math.isnan(e_m_vals[e_m_val])
-                        ):
-                            stat_similar = "Success"
-                        else:
-                            stat_similar = "Failure"
-                        # Log the results of the comparison
-                        logger.info(
-                            f"Program table Program: {prog['program_name']}, method: {method}, "
-                            f"comparison of {m_val} to expected "
-                            f"value results in: {stat_similar}"
-                        )
-                    if stat_similar == "Failure":
-                        ret_string = stat_similar
-    return ret_string
+    for out_file in out_csv_files:
+        out_file_path = os.path.join(out_dir, out_file)
+        expected_file_path = os.path.join(expected_dir, out_file)
+
+        if not os.path.exists(expected_file_path):
+            logger.error(f"Expected file {expected_file_path} does not exist.")
+            success = False
+            continue
+
+        try:
+            out_df = read_and_normalize_csv(out_file_path)
+            expected_df = read_and_normalize_csv(expected_file_path)
+
+            if out_df.equals(expected_df):
+                logger.info(f"Comparison of {out_file}: Success")
+            else:
+                logger.error(f"Comparison of {out_file}: Failure")
+                success = False
+        except Exception as e:
+            logger.error(f"Error comparing {out_file}: {e}")
+            success = False
+
+    return "Success" if success else "Failure"
 
 
 def compare_out_files(out_dir, expected_results, logger) -> Literal["Success", "Failure"]:
-    ret_string: Literal = "Success"
+    ret_string: Literal["Success", "Failure"] = "Success"
 
     # Setup Directory Comparison
     comparison: filecmp.dircmp = filecmp.dircmp(out_dir, expected_results)
@@ -162,17 +143,15 @@ def compare_outputs(
     # params_match: Literal['Success', 'Failure'] = compare_params(out_dir, expected_results)
     # logger.info(f"{'Parameters comparison status:'} {params_match}")
 
-    # Check Program table is within acceptable range
-    prog_table_match: Literal["Success", "Failure"] = compare_prog_tables(
-        out_dir, expected_results, logger
-    )
-    logger.info(f"{'Programs comparison status:'} {prog_table_match}")
-
     # Compare filenames in expected outputs to outputs
     out_files_match: Literal["Success", "Failure"] = compare_out_files(
         out_dir, expected_results, logger
     )
     logger.info(f"{'Output Files comparison status:'} {out_files_match}")
+
+    # Check Summary CSVs are within acceptable range
+    csv_match: Literal["Success", "Failure"] = compare_csvs(out_dir, expected_results, logger)
+    logger.info(f"{'Summary comparison status:'} {csv_match}")
 
     # Log Test Ending Message
     logger.info("End to End Testing Complete -----------------------------------------------------")

@@ -1,5 +1,91 @@
 # Change Log
 
+## 2024-09-20 - Version 4.2
+
+1. Runtime Optimizations
+2. LDAR-Sim Run scripts were refactored to shared common behavior and be more modular
+3. Added LDAR-Sim error logging functionality
+4. Added parameter to keep all program outputs
+5. Added parameter to disable pre-simulation emissions
+6. Updated Stationary Rolling Average functionality
+7. Various bugfixes:
+    - Fixed runtime error during emissions creation when duration is provided in infrastructure files
+    - Fixed METEC NoWind sensor
+    - Fixed runtime error occurring in scenarios with little detected emissions
+    - Fixed runtime error occurring when simulation duration was <= 1 year
+
+## 2024-07-31 - Version 4.1.1
+
+1. Update and re-introduce the End to End test runner, creator and suite
+2. Deprecate Reference program parameter
+3. Update estimate default parameter values
+4. Add documentation and support for long pathways (Windows OS)
+5. Runtime and memory optimization
+6. New quantification error module
+7. Various bug fixes:
+    - quantification error module file read bug
+    - generate emissions can now generate emission on the last day of simulation
+    - error handling for missing survey frequency
+    - error handling for missing methods
+
+## 2024-07-11 - Version 4.1.0
+
+1. Implemented duration estimation factor - See user manual for more details
+
+## 2024-07-11 - Version 4.0.5
+
+1. Fixed crew count always being overwritten by estimated crew count
+2. Update language around sensitivity analysis
+3. Update language of stacked cost (now value) bar chart
+4. Fix bug with sites considered for follow-ups and queue for follow-ups
+
+## 2024-07-07 - Version 4.0.4
+
+1. Fixed per day costs
+2. Fixed scaling with surveys at the equipment group level
+3. Fixed error preventing users from setting parameters at the equipment group level
+4. Updated default parameter data types
+5. New unit tests added
+6. Other various bugs/future exception warnings
+
+## 2024-07-02 - Version 4.0.3
+
+1. Fixed potential crew shortage warning message
+2. Fixed tick labels on output visualizations to show numbers between -1 to 1, specifically 0 when using metric prefixes
+3. Added option to disable program specific visualizations
+4. Fixed error that would sometimes occur with summary output generation
+
+## 2024-06-20 - Version 4.0.2
+
+1. Mitigation related plots will automatically not be rendered when there are no mitigation in the simulation.
+2. Updated the sensitivity analysis module script to be in line with the ldar_sim_run script
+
+## 2024-06-19 - Version 4.0.1
+
+1. Fixed an Issue where users would encounter an error when trying to simulate only non-repairable emissions
+
+## 2024-06-17 - Version 4.0.0
+
+The version bump to 4.0 of LDAR-Sim included a significant overhaul of the existing code base and functionality overhaul.
+
+1. Improved User Manual
+2. Improved stationary deployment - continuous monitoring is now based on rolling averages
+3. Improved quantification error
+4. Refactored emissions, added granularity - see User Manual for more details
+5. Refactored infrastructure, added granularity - see User Manual for more details
+6. Refactored sensors, the following sensors are now built into ldar-sim: METEC_NoWind, OGI_Zim, and OGI_RK (See user manual for more details on how to use them)
+7. Refactored scheduling, significant runtime improvement from v3
+8. New Output parameters to disable outputs
+9. New uncertainty outputs
+10. New Sensitivity Analysis Module
+11. New debugging mode - enables benchmarking
+12. _Removed routing functionality_
+13. New unit tests
+
+## 2024-03-18 - Version 3.3.6
+
+1. **New Documentation** Added new installation guide documentation.
+
 ## 2023-11-30 - Version 3.3.5
 
 1. **Bug fix for METEC wind sensor** Fixed the wind factor units. Previously used km/hr, changed to m/s to properly reflect the METEC wind dependent curve.

@@ -13,125 +13,96 @@
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 # MIT License for more details.
 
-import copy
-import gc
 
 # You should have received a copy of the MIT License
 # along with this program.  If not, see <https://opensource.org/licenses/MIT>.
 #
 # ------------------------------------------------------------------------------
+import cProfile
+import logging
 import os
-import random as rand
 import sys
-from datetime import datetime, timedelta
+from datetime import datetime
+from pathlib import Path
 
-from initialization.sites import get_subtype_dist
-from numpy import random as np_rand
-from stdout_redirect import stdout_redirect
-from time_counter import TimeCounter
-from weather.weather_lookup import WeatherLookup as WL
-from weather.weather_lookup_hourly import WeatherLookup as WL_h
-
-from ldar_sim import LdarSim
+from constants.file_processing_const import IOLocationConstants as io_loc
+from constants.output_messages import RuntimeMessages as rm
+from file_processing.input_processing.input_manager import InputManager
+from initialization.args import files_from_args
+from log_utils.logging_config import setup_error_logging
+from simulation.simulation_manager import SimulationManager
 
 
-def ldar_sim_run(simulation):
-    """
-    The ldar sim run function takes a simulation dictionary
-    simulation = a dictionary of simulation parameters necessary to run LDAR-Sim
-    """
-    # i = simulation['i']
-    simulation = copy.deepcopy(simulation)
-    virtual_world = simulation["virtual_world"]
-    program_parameters = simulation["program"]
-    input_directory = simulation["input_directory"]
-    output_directory = simulation["output_directory"] / program_parameters["program_name"]
-    virtual_world["pregenerate_leaks"] = simulation["pregenerate_leaks"]
-    virtual_world["leak_timeseries"] = simulation["leak_timeseries"]
-    virtual_world["initial_leaks"] = simulation["initial_leaks"]
-    virtual_world["seed_timeseries"] = simulation["seed_timeseries"]
-    virtual_world["sites"] = simulation["sites"]
-    simulation_settings = simulation["simulation_settings"]
+def run_ldar_sim(parameter_filenames, DEBUG=False):
+    try:
 
-    if not os.path.exists(output_directory):
-        try:
-            os.makedirs(output_directory)
-        except Exception:
-            pass
+        input_manager = InputManager()
 
-    logfile = open(output_directory / "logfile.txt", "w")
-    if "print_from_simulation" not in simulation or simulation["print_from_simulation"]:
-        sys.stdout = stdout_redirect([sys.stdout, logfile])
-    else:
-        sys.stdout = stdout_redirect([logfile])
-    gc.collect()
-    print(simulation["opening_message"])
-    virtual_world["simulation"] = str(simulation["i"])
+        simulation_manager: SimulationManager = SimulationManager(
+            input_manager=input_manager, parameter_filenames=parameter_filenames
+        )
 
-    # --------- Leak distributions -------------
-    if len(virtual_world["leak_timeseries"]) < 1:
-        get_subtype_dist(virtual_world, input_directory)
+        simulation_manager.check_inputs()
 
-    # --------------------------------------
-    # --- Initialize dynamic model state ---
-    state = {
-        "t": None,
-        "operator": None,  # operator gets assigned during initialization
-        "methods": [],  # list of methods in action
-        "sites": virtual_world["sites"],  # sites in the simulation
-        "flags": [],  # list of sites flagged for follow-up
-        # 'leaks': [],  # list of all current leaks
-        "tags": [],  # leaks that have been tagged for repair
-        "weather": None,  # weather gets assigned during initialization
-        "daylight": None,  # daylight hours calculated during initialization
-        # 'init_leaks': [],  # the initial leaks generated at timestep 1
-        "max_leak_rate": None,  # the largest leak in the input file
-        "site_visits": {},
-    }
+        simulation_manager.initialize_outputs(input_manager, setup_output_logging=True)
 
-    # ------------------------Initialize timeseries data----------------------------
+        simulation_manager.check_generator_files()
 
-    timeseries = {
-        "datetime": [],
-        "active_leaks": [],
-        "new_leaks": [],
-        "n_tags": [],
-        "rolling_cost_estimate": [],
-        "rolling_cost_estimate_b": [],
-        "cum_repaired_leaks": [],
-        "daily_emissions_kg": [],
-    }
+        simulation_manager.setup_infrastructure()
 
-    # -----------------------------Run simulations----------------------------------
+        simulation_manager.setup_emissions()
 
-    # Initialize objects
-    if "weather_is_hourly" in virtual_world and virtual_world["weather_is_hourly"]:
-        state["weather"] = WL_h(state, virtual_world, input_directory)
-    else:
-        state["weather"] = WL(state, virtual_world, input_directory)
-    state["t"] = TimeCounter(simulation_settings["start_date"], simulation_settings["end_date"])
-    virtual_world.update({"timesteps": state["t"].timesteps})
-    sim = LdarSim(
-        simulation_settings,
-        state,
-        program_parameters,
-        virtual_world,
-        timeseries,
-        input_directory,
-        output_directory,
+        simulation_manager.setup_weather()
+
+        simulation_manager.setup_daylight()
+
+        simulation_manager.run_simulations(DEBUG=DEBUG)
+
+        simulation_manager.generate_summary_results()
+
+    except Exception as e:
+        logger: logging.Logger = logging.getLogger(__name__)
+        logger.exception(rm.SIMULATION_ERROR)
+        raise e
+
+
+def setup_logging(root_dir: Path) -> None:
+    # Setup log folder
+    log_folder: Path = root_dir / io_loc.LOG_FOLDER
+    if not os.path.exists(log_folder):
+        os.makedirs(log_folder)
+
+    timestamp: str = datetime.now().strftime("%Y-%m-%d_%H-%M")
+
+    setup_error_logging(
+        log_folder=log_folder,
+        timestamp=timestamp,
+        log_to_file=True,
+        log_to_console=True,
     )
-    start_date = datetime(*simulation_settings["start_date"])
-    # Loop through timeseries
-    for ts in range(state["t"].timesteps):
-        state["t"].current_timestep = ts
-        state["t"].current_date = start_date + timedelta(days=ts)
-        if virtual_world["seed_timeseries"]:
-            np_rand.seed(virtual_world["seed_timeseries"][state["t"].current_timestep])
-            rand.seed(virtual_world["seed_timeseries"][state["t"].current_timestep])
-        sim.update()
 
-    # Clean up and write files
-    sim_summary = sim.finalize()
-    print(simulation["closing_message"])
-    logfile.close()
-    return sim_summary
+
+if __name__ == "__main__":
+
+    print(rm.OPENING_MSG)
+
+    root_dir: Path = Path(__file__).resolve().parent.parent
+    os.chdir(root_dir)
+
+    setup_logging(root_dir)
+
+    src_dir: Path = root_dir / "src"
+    sys.path.insert(1, str(src_dir))
+
+    # -- Retrieve input parameters from commandline argument and parse --
+    parameter_filenames, _DEBUG = files_from_args(root_dir)
+
+    if _DEBUG:
+        print(rm.DEBUG_MODE_ON)
+        cProfile.run(
+            "run_ldar_sim(parameter_filenames, _DEBUG)",
+            "../Benchmarking/benchmark1_results",
+            "cumulative",
+        )
+    else:
+        run_ldar_sim(parameter_filenames, _DEBUG)
